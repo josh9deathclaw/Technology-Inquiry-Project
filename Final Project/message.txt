@@ -1,0 +1,189 @@
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME680.h>
+//#include <BH1750.h>
+#define SEAPRESSURELEVEL (1013.25)
+
+//BME680 Setup
+Adafruit_BME680 bme;
+int BME680Address = 0;
+
+//BH1750 Setup
+//BH1750 lightMeter(0x23);
+//int BH1750Address = 1;
+
+//SDI-12 Setup
+#define DIRO 7
+
+String command;
+
+//Initialise SDI12 address variable
+int SDIAddress = 0;
+
+//Initialise the BME680 sensor variable
+String deviceIdentification = "BME680 sensor";
+
+void setup() {
+  //Arduino IDE Serial Monitor
+  Serial.begin(9600);
+
+  // ================ BME680 ================
+  if (!bme.begin(0x76)) {
+    Serial.println("Could not find a valid BME680 sensor, check wiring!");
+    while (1);
+  }
+    // Set the temperature, pressure and humidity and gas resistance oversampling
+  bme.setTemperatureOversampling(BME680_OS_8X);
+  bme.setPressureOversampling(BME680_OS_8X);
+  bme.setHumidityOversampling(BME680_OS_2X);
+  bme.setGasHeater(320,150);
+
+
+  // ================ BH1750 ================
+  //Wire.begin();
+  //lightMeter.begin();
+
+
+  // ================ SDI-12 ================
+  Serial1.begin(1200, SERIAL_7E1);  //SDI-12 UART, configures serial port for 7 data bits, even parity, and 1 stop bit
+  pinMode(DIRO, OUTPUT);               //DIRO Pin
+
+  //HIGH to Receive from SDI-12
+  digitalWrite(DIRO, HIGH);
+}
+
+void loop() {
+  int byte;
+  //Receive SDI-12 over UART and then print to Serial Monitor
+  if(Serial1.available()) {
+    byte = Serial1.read();        //Reads incoming communication in bytes
+    //Serial.println(byte);
+    if (byte == 33) {             //If byte is command terminator (!)
+      SDI12Receive(command);
+      command = "";               //reset command string
+    } else {
+      if (byte != 0) {            //do not add start bit (0)
+      command += char(byte);      //append byte to command string
+      }
+    }
+  }
+}
+
+
+
+//Recieve Data SDI12 Method
+void SDI12Receive(String input) {
+  //convert device address to string
+  String address = String(SDIAddress);
+  //Determines if the command is addressed for this device
+ 
+  //Address Query  
+  if (String(input.charAt(0)) == "?"){
+    SDI12Send(address);
+  }
+
+  //Change the SDIAddress variable based on SDI12 command aAb! (a = SDIAddress, b = new SDIAddress)
+  if (String(input.charAt(0)) == address){
+    if (String(input.charAt(1)) == "A"){
+      SDIAddress = (String(input.charAt(2))).toInt();
+      address = (String(input.charAt(2)));
+      SDI12Send(address);
+    }
+
+    //Start measurement based on SDI12 command aM! (a = current SDIAddress)
+    if (String(input.charAt(1)) == "M"){
+      bme.beginReading();
+      delay(3000);
+      bme.endReading();
+      SDI12Send(address + String("0034"));
+    }
+
+    //Send the measured sensor data to serial monitor and UART using aD0! (a = SDIAddress, 3rd byte = sensor page number ie: BME680 = 0, BH1750 = 1 *not implemented due to I2C - 2 port not working)
+    if ((String(input.charAt(1)) == "D") && (String(input.charAt(2)) == "0")){
+      //bme.performReading();
+      SDI12Send(address + String("+") + String(bme.temperature) + String("+") + String(bme.pressure) + String("+") + String(bme.humidity) + String("+") + String(bme.gas_resistance));
+      /*SDI12Send(String(bme.temperature) + String("+"));
+      SDI12Send(String(bme.pressure) + String("+"));
+      SDI12Send(String(bme.humidity) + String("+"));
+      SDI12Send(String(bme.gas_resistance) + String("\n"));*/
+    }
+
+    //3-second-delay loop of measured sensore data based on SDI12 command aR0! (Same as above)
+    if (String(input.charAt(1)) == "R"){
+    while ((String(input.charAt(1)) == "R")){
+      if (String(input.charAt(2)) == "0"){
+        bme.performReading();
+        //SDI12Send(address + String("+"));
+        SDI12Send(address + String("+") + String(bme.temperature) + String("+") + String(bme.pressure) + String("+") + String(bme.humidity) + String("+") + String(bme.gas_resistance));
+        /*SDI12Send(String(bme.pressure) + String("+"));
+        SDI12Send(String(bme.humidity) + String("+"));
+        SDI12Send(String(bme.gas_resistance) + String("\n"));*/
+      }
+      delay(3000);
+      int byte;
+      if (Serial1.available()){
+        byte = Serial1.read();
+        if (input.length() > 0)
+        {
+          break;
+        }
+      }
+    }
+  }
+  }
+  
+
+  /*if ((String(input.charAt(0)) == address) && (String(input.charAt(1)) == "M")){
+    bme.beginReading();
+    delay(3000);
+    bme.endReading();
+    SDI12Send("00034" + String("\n"));
+  }*/
+
+  /*if ((String(input.charAt(0)) == address) && (String(input.charAt(1)) == "D") && (String(input.charAt(2)) == "0")){
+    //bme.performReading();
+    SDI12Send(String(bme.temperature) + String("+"));
+    SDI12Send(String(bme.pressure) + String("+"));
+    SDI12Send(String(bme.humidity) + String("+"));
+    SDI12Send(String(bme.gas_resistance) + String("\n"));
+  }*/
+
+  /*if ((String(input.charAt(0)) == address) && (String(input.charAt(1)) == "R") && (String(input.charAt(2)) == "0")){
+    while ((String(input.charAt(1)) == "R") && (String(input.charAt(2)) == "0")){
+      bme.performReading();
+      SDI12Send(address + String("+"));
+      SDI12Send(String(bme.temperature) + String("+"));
+      SDI12Send(String(bme.pressure) + String("+"));
+      SDI12Send(String(bme.humidity) + String("+"));
+      SDI12Send(String(bme.gas_resistance) + String("\n"));
+      delay(3000);
+      int byte;
+      if (Serial1.available()){
+        byte = Serial1.read();
+      }
+      return;
+    }
+  }*/
+}
+
+
+//Send Data SDI12 Method
+void SDI12Send(String message) {
+  Serial.println(message);
+  
+  digitalWrite(DIRO, LOW);
+  delay(100);
+  Serial1.print(message + String("\r\n"));
+  Serial1.flush();    //wait for print to finish
+  Serial1.end();
+  Serial1.begin(1200, SERIAL_7E1);
+  digitalWrite(DIRO, HIGH);
+  //secondruntoken = 0;
+}
+
+
+
+
+
+
+
